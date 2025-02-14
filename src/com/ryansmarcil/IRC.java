@@ -7,207 +7,246 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.Arrays;
 import java.util.LinkedList;
+import java.util.Queue;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class IRC {
+  /*
+   * Minimal non-blocking event-based client for interacting with IRC servers. The client has no
+   * knowledge of the IRC protocol beyond sending and receiving arbitrary messages over the network
+   *
+   * @author ryansmarcil
+   */
   public static class Client {
     /* Network objects */
-    private SocketChannel server;
+    private SocketChannel serverChannel;
+    private InetSocketAddress serverAddress;
+    private StringBuilder messageBuffer; // Incoming message buffer
+    private Queue<ByteBuffer> messageQueue; // Outgoing message queue
 
     /* Event listeners */
     public Consumer<Client> onConnect;
-    public Consumer<Client> onDisconnect;
-    public BiConsumer<Client, String> onMessage;
-    public BiConsumer<Client, String[]> onCommand;
+    public BiConsumer<Client, StringBuilder> onSend;
+    public BiConsumer<Client, StringBuilder> onReceive;
+
+    public Client() {
+      this.messageBuffer = new StringBuilder();
+      this.messageQueue = new LinkedList<>();
+    }
 
     /*
-     * Check connection status
+     * Check whether the client has a connection
+     *
+     * @return the client's connection status
      */
     public boolean isConnected() {
-      return this.server != null && this.server.isOpen() && this.server.isConnected();
+      return this.serverChannel != null && this.serverChannel.isConnected();
     }
 
     /*
-     * Connect to an IRC server
+     * Check whether the client has a pending connection
+     *
+     * @return the client's connection status
      */
-    public boolean connect(String hostname, int port) throws IOException {
-      if (this.server == null || this.server.isOpen() == false
-          || this.server.isConnected() == false) {
-        this.server = SocketChannel.open();
+    public boolean isConnectionPending() {
+      return this.serverChannel != null && this.serverChannel.isConnectionPending();
+    }
 
-        if (this.server.connect(new InetSocketAddress(hostname, port))) {
-          this.server.configureBlocking(false);
+    /*
+     * Specify the address of the server to connect to
+     *
+     * @param hostname the hostname of the target server
+     * @param port the port of the target server
+     */
+    public void connectTo(String hostname, int port) {
+      connectTo(new InetSocketAddress(hostname, port));
+    }
 
-          if (this.onConnect != null) {
-            this.onConnect.accept(this);
-          }
+    /*
+     * Specify the address of the server to connect to
+     *
+     * @param serverAddress the address of the target server
+     * @see InetSocketAddress
+     */
+    public void connectTo(InetSocketAddress serverAddress) {
+      this.serverAddress = serverAddress;
+    }
 
-          return true;
-        }
+    /*
+     * Connect to an IRC server. The server address MUST be specified with Client::connectTo()
+     * before calling this method. If the client is already connected to a server, it MUST
+     * disconnect before establishing a new connection
+     *
+     * @return the client's connection status
+     * @exception IOException
+     */
+    public boolean connect() throws IOException {
+      /* We're already connected or we don't know where to connect to*/
+      if (this.isConnected()) {
+        return true;
       }
-      return false;
+      if (this.serverAddress == null) {
+        return false;
+      }
+      /* We need to request a socket */
+      if (this.serverChannel == null || this.serverChannel.isOpen() == false) {
+        this.serverChannel = SocketChannel.open();
+        this.serverChannel.configureBlocking(false);
+      }
+      /* Attempt to establish a connection */
+      boolean connectionEstablished;
+      if (this.isConnectionPending()) {
+        connectionEstablished = this.serverChannel.finishConnect();
+      } else {
+        connectionEstablished = this.serverChannel.connect(this.serverAddress);
+      }
+      /* Connection established! Propogate event */
+      if (connectionEstablished && this.onConnect != null) {
+        this.onConnect.accept(this);
+      }
+      return connectionEstablished;
     }
 
     /*
-     * Disconnect from an IRC server
+     * Disconnect the client from the server
+     *
+     * @exception IOException
      */
-    public boolean disconnect() throws IOException {
-      if (this.server != null && this.server.isOpen() && this.server.isConnected()) {
-        this.server.configureBlocking(true);
+    public void disconnect() throws IOException {
+      this.serverChannel.close();
+    }
 
-        if (this.onDisconnect != null) {
-          this.onDisconnect.accept(this);
-        }
+    /*
+     * Enqueue an outgoing raw IRC message. The message will be queued even if the client is not
+     * connected to any server. rawMessage will be wrapped in a StringBuilder and passed to the
+     * Client::onSend listener
+     *
+     * @param rawMessage raw IRC message
+     * @return whether rawMessage was successfully added to the queue
+     * @see StringBuilder
+     */
+    public boolean send(String rawMessage) {
+      return send(new StringBuilder(rawMessage));
+    }
 
-        this.server.close();
+    /*
+     * Enqueue an outgoing raw IRC message. The message will be queued even if
+     * the client is not connected to any server. rawMessage will be passed to the Client::onSend
+     * listener
+     *
+     * @param rawMessage raw IRC message
+     * @return whether rawMessage was successfully added to the queue
+     * @see StringBuilder
+     */
+    public boolean send(StringBuilder rawMessage) {
+      if (this.onSend != null) {
+        this.onSend.accept(this, rawMessage);
+      }
+      rawMessage.append("\r\n");
+      ByteBuffer wrappedMessage = ByteBuffer.wrap(rawMessage.toString().getBytes());
+      return this.messageQueue.offer(wrappedMessage);
+    }
+
+    /*
+     * Enqueue an outgoing raw IRC message. The message will be queued even if the client is not
+     * connected to any server. rawMessage will NOT be passed to the Client::onSend listener
+     *
+     * @param rawMessage raw IRC message
+     * @return whether rawMessage was successfully added to the queue
+     */
+    public boolean sendUnmodifiable(String rawMessage) {
+      ByteBuffer wrappedMessage = ByteBuffer.wrap((rawMessage + "\r\n").getBytes());
+      return this.messageQueue.offer(wrappedMessage);
+    }
+
+    /*
+     * Receive a raw IRC message. rawMessage will be wrapped in a StringBuilder and passed to the
+     * Client::onReceive listener
+     *
+     * @param rawMessage raw IRC message
+     * @return whether rawMessage was processed
+     * @see StringBuilder
+     */
+    public boolean receive(String rawMessage) {
+      return receive(new StringBuilder(rawMessage));
+    }
+
+    /*
+     * Receive a raw IRC message. rawMessage will be passed to the Client::onReceive listener
+     *
+     * @param rawMessage raw IRC message
+     * @return whether rawMessage was processed
+     * @see StringBuilder
+     */
+    public boolean receive(StringBuilder rawMessage) {
+      if (this.onReceive != null) {
+        this.onReceive.accept(this, rawMessage);
         return true;
       }
       return false;
     }
 
     /*
-     * Poll for events
+     * Internally calls Client::read() and Client::write()
+     *
+     * @exception IOException
      */
     public void pollEvents() throws IOException {
       this.read();
       this.write();
     }
 
-    /*
-     * Send raw IRC message
-     */
-    public boolean send(String rawMessage) {
-      ByteBuffer outPacket = ByteBuffer.allocate(rawMessage.length() + 2);
-      outPacket.put(rawMessage.getBytes());
-      outPacket.put("\r\n".getBytes());
-      outPacket.flip();
-      return outPacketQueue.offer(outPacket);
-    }
+    private char _read_lastByte = 0;
+    private ByteBuffer _read_byteByffer = ByteBuffer.allocate(4096);
 
     /*
-     * Receive raw IRC message
+     * Read incoming data from the connected server
+     *
+     * @exception IOException
      */
-    public boolean receive(String rawMessage) {
-      if (this.onMessage != null) {
-        this.onMessage.accept(this, rawMessage);
-      }
-
-      if (this.onCommand != null) {
-        // Parse raw message into IRC fields
-        LinkedList<String> command = new LinkedList<>();
-        command.add(null); // Prefix
-        command.add(null); // Command
-
-        int index = -1;
-        // Check if message has a prefix
-        if (rawMessage.indexOf(':') == 0) {
-          index = rawMessage.indexOf(' ');
-          if (index != -1) {
-            // Found the prefix!
-            command.set(0, rawMessage.substring(1, index));
-            rawMessage = rawMessage.substring(index + 1);
-          } else {
-            // The message contains ONLY a prefix
-            command.set(0, rawMessage.substring(1));
-            rawMessage = rawMessage.substring(1);
-          }
-        }
-
-        index = rawMessage.indexOf(' ');
-        if (index != -1) {
-          // Found the command name!
-          command.set(1, rawMessage.substring(0, index));
-          rawMessage = rawMessage.substring(index + 1);
-        } else {
-          // The message contains ONLY a command
-          command.set(1, rawMessage);
-          rawMessage = "";
-        }
-
-        String[] parameters;
-
-        if (rawMessage.length() == 0) {
-          // There are no parameters
-          parameters = new String[0];
-        } else {
-          parameters = rawMessage.split(":");
-        }
-
-        // There are possibly parameters
-        if (parameters.length > 0) {
-          for (String parameter : parameters[0].split(" ")) {
-            if (parameter.length() > 0) {
-              command.add(parameter);
-            }
-          }
-        }
-
-        // There is a special final parameter
-        if (parameters.length > 1) {
-          String parameter = parameters[1];
-          if (parameter.length() > 0) {
-            command.add(parameter);
-          }
-        }
-
-        this.onCommand.accept(this, command.toArray(new String[0]));
-      }
-      return true;
-    }
-
-    /* Read incoming data */
-
-    private char inLastByte = 0;
-    private StringBuilder inMessageBuffer = new StringBuilder();
-    private ByteBuffer inPacketBuffer = ByteBuffer.allocate(4096);
-
-    private void read() throws IOException {
+    public void read() throws IOException {
       int bytesRead;
-      while ((bytesRead = this.server.read(this.inPacketBuffer)) > 0) {
-        this.inPacketBuffer.flip();
-
-        while (this.inPacketBuffer.hasRemaining()) {
-          char inCurrentByte = (char) this.inPacketBuffer.get();
-
-          if (inCurrentByte == (int) '\n') {
-            if (this.inLastByte == '\r') {
-              this.receive(this.inMessageBuffer.toString());
-              this.inLastByte = 0;
-              this.inMessageBuffer = new StringBuilder();
+      while ((bytesRead = this.serverChannel.read(this._read_byteByffer)) > 0) {
+        this._read_byteByffer.flip();
+        while (this._read_byteByffer.hasRemaining()) {
+          char currentByte = (char) this._read_byteByffer.get();
+          if (currentByte == (int) '\n') {
+            if (this._read_lastByte == '\r') {
+              /* We have a complete message */
+              this.receive(this.messageBuffer);
+              this._read_lastByte = 0;
+              this.messageBuffer = new StringBuilder();
               continue;
             }
-          } else if (inCurrentByte != (int) '\r') {
-            this.inMessageBuffer.append(inCurrentByte);
+          } else if (currentByte != (int) '\r') {
+            /* We have a partial message */
+            this.messageBuffer.append(currentByte);
           }
-
-          this.inLastByte = inCurrentByte;
+          this._read_lastByte = currentByte;
         }
-
-        this.inPacketBuffer.clear();
+        this._read_byteByffer.clear();
       }
-
       if (bytesRead == -1) {
-        this.server.close();
+        /* We got disconnected */
+        this.serverChannel.close();
       }
     }
 
-    /* Write outgoing data */
-
-    private LinkedList<ByteBuffer> outPacketQueue = new LinkedList<>();
-
-    private void write() throws IOException {
-      ByteBuffer outPacket = outPacketQueue.peek();
-
-      while (outPacket != null) {
-        if (this.server.write(outPacket) == 0) {
-          if (outPacket.hasRemaining()) {
+    /*
+     * Write outgoing data to the connected server
+     *
+     * @exception IOException
+     */
+    public void write() throws IOException {
+      ByteBuffer outgoingMessage = this.messageQueue.peek();
+      while (outgoingMessage != null) {
+        if (this.serverChannel.write(outgoingMessage) == 0) {
+          if (outgoingMessage.hasRemaining()) {
             return;
           } else {
-            outPacketQueue.poll();
-            outPacket = outPacketQueue.peek();
+            this.messageQueue.poll();
+            outgoingMessage = this.messageQueue.peek();
           }
         }
       }

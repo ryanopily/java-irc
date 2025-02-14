@@ -6,35 +6,41 @@ public class Abjects {
   public static void main(String[] args) throws IOException {
     IRC.Client client = new IRC.Client();
 
-    client.onConnect = (_client) -> {
-      /* Register client with the server */
-      _client.send("USER doejohn * * :John Doe");
-      _client.send("NICK doejohn");
+    /* Called when the client connects to the server for the first time */
+    client.onConnect = (irc) -> {
+      irc.sendUnmodifiable("USER doejohn * * :John Doe");
+      irc.sendUnmodifiable("NICK doejohn");
     };
 
-    client.onMessage = (_client, message) -> {
-      /* Write raw irc messages to stdout */
+    /* Called when the client receives a message */
+    client.onReceive = (irc, message) -> {
+      /* Respond to server pings to keep client connected */
+      if (message.substring(0, 4).equalsIgnoreCase("PING")) {
+        irc.sendUnmodifiable(message.toString().replaceFirst("PING", "PONG"));
+      }
+      /* Print messages to stdout*/
       System.out.println(message);
     };
 
-    client.onCommand = (_client, command) -> {
-      /* Respond to PING commands to keep connection alive */
-      if (command[1] != null && command[1].equalsIgnoreCase("PING") && command.length > 2) {
-        _client.send(String.format("PONG :%s", command[2]));
-      }
-    };
+    /* Set the target server address */
+    client.connectTo("irc.abjects.net", 6667);
 
-    if (client.connect("irc.abjects.net", 6667)) {
-      while (client.isConnected()) {
-        client.pollEvents();
+    /* Attempt to connect */
+    while (client.isConnected() == false) {
+      client.connect();
+    }
 
-        /* Get user input */
-        int available = System.in.available();
-        if (available > 0) {
-          byte[] data = new byte[available];
-          System.in.read(data);
-          client.send(new String(data));
-        }
+    /* Connected! */
+    while (client.isConnected() == true) {
+      /* Attempt to read/write */
+      client.pollEvents();
+
+      /* Get user input */
+      int available = System.in.available();
+      if (available > 0) {
+        byte[] data = new byte[available];
+        System.in.read(data);
+        client.send(new String(data));
       }
     }
   }

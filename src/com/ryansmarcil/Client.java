@@ -240,13 +240,12 @@ public class Client {
   public void write() throws IOException {
     ByteBuffer outgoingMessage = this.messageQueue.peek();
     while (outgoingMessage != null) {
-      if (this.serverChannel.write(outgoingMessage) == 0) {
-        if (outgoingMessage.hasRemaining()) {
-          return;
-        } else {
-          this.messageQueue.poll();
-          outgoingMessage = this.messageQueue.peek();
-        }
+      int bytesWritten = this.serverChannel.write(outgoingMessage);
+      if (outgoingMessage.hasRemaining() == false) {
+        this.messageQueue.poll();
+        outgoingMessage = this.messageQueue.peek();
+      } else if (bytesWritten == 0) {
+        return;
       }
     }
   }

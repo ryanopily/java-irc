@@ -1,2 +1,2 @@
-# irc-client
-Minimal Java client for IRC communication
+#java-irc
+A minimal non-blocking event-based client for interacting with IRC servers.

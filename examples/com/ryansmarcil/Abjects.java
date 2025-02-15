@@ -4,12 +4,12 @@ import java.io.IOException;
 
 public class Abjects {
   public static void main(String[] args) throws IOException {
-    IRC.Client client = new IRC.Client();
+    Client client = new Client();
 
     /* Called when the client connects to the server for the first time */
     client.onConnect = (irc) -> {
-      irc.sendUnmodifiable("USER doejohn * * :John Doe");
-      irc.sendUnmodifiable("NICK doejohn");
+      irc.sendUnmodifiable("USER johndoe * * :John Doe");
+      irc.sendUnmodifiable("NICK johndoe");
     };
 
     /* Called when the client receives a message */

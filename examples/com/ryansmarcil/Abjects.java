@@ -8,15 +8,15 @@ public class Abjects {
 
     /* Called when the client connects to the server for the first time */
     client.onConnect = (irc) -> {
-      irc.sendUnmodifiable("USER johndoe * * :John Doe");
-      irc.sendUnmodifiable("NICK johndoe");
+      irc.send("USER johndoe * * :John Doe");
+      irc.send("NICK johndoe");
     };
 
     /* Called when the client receives a message */
     client.onReceive = (irc, message) -> {
       /* Respond to server pings to keep client connected */
       if (message.substring(0, 4).equalsIgnoreCase("PING")) {
-        irc.sendUnmodifiable(message.toString().replaceFirst("PING", "PONG"));
+        irc.send(message.toString().replaceFirst("PING", "PONG"));
       }
       /* Print messages to stdout*/
       System.out.println(message);

@@ -29,7 +29,20 @@ public class Client {
   public BiConsumer<Client, StringBuilder> onSend;
   public BiConsumer<Client, StringBuilder> onReceive;
 
-  public Client() {
+  /*
+   * @param hostname hostname of the server to connect to
+   * @param port port of the server to connect to
+   */
+  public Client(String hostname, int port) {
+    this(new InetSocketAddress(hostname, port));
+  }
+
+  /*
+   * @param serverAddress address of the server to connect to
+   * @see InetSocketAddress
+   */
+  public Client(InetSocketAddress serverAddress) {
+    this.serverAddress = serverAddress;
     this.messageBuffer = new StringBuilder();
     this.messageQueue = new LinkedList<>();
   }
@@ -44,29 +57,7 @@ public class Client {
   }
 
   /*
-   * Specify the address of the server to connect to
-   *
-   * @param hostname the hostname of the target server
-   * @param port the port of the target server
-   */
-  public void connectTo(String hostname, int port) {
-    connectTo(new InetSocketAddress(hostname, port));
-  }
-
-  /*
-   * Specify the address of the server to connect to
-   *
-   * @param serverAddress the address of the target server
-   * @see InetSocketAddress
-   */
-  public void connectTo(InetSocketAddress serverAddress) {
-    this.serverAddress = serverAddress;
-  }
-
-  /*
-   * Connect to the server specified by Client::connectTo().
-   * If the client is already connected to a server, it MUST
-   * call Client::disconnect() before establishing a new connection
+   * Connect to the server specified in the constructor
    *
    * @return the client's connection status
    * @exception IOException
@@ -102,7 +93,7 @@ public class Client {
 
   /*
    * Send a message. The message will be queued even if the client is not
-   * connected to a server. rawMessage will be passed to and may be modified by the
+   * connected to the server. rawMessage will be passed to and may be modified by the
    * Client::onSend listener
    *
    * @param rawMessage raw message
@@ -114,7 +105,7 @@ public class Client {
 
   /*
    * Send a message. The message will be queued even if
-   * the client is not connected to a server. rawMessage will be passed to and may be modified by
+   * the client is not connected to the server. rawMessage will be passed to and may be modified by
    * the Client::onSend listener
    *
    * @param rawMessage raw message

@@ -4,7 +4,7 @@ import java.io.IOException;
 
 public class Abjects {
   public static void main(String[] args) throws IOException {
-    Client client = new Client();
+    Client client = new Client("irc.abjects.net", 6667);
 
     /* Called when the client connects to the server for the first time */
     client.onConnect = (irc) -> {
@@ -21,9 +21,6 @@ public class Abjects {
       /* Print messages to stdout*/
       System.out.println(message);
     };
-
-    /* Set the target server address */
-    client.connectTo("irc.abjects.net", 6667);
 
     /* Attempt to connect */
     while (client.isConnected() == false) {
